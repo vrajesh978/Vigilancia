@@ -3,6 +3,7 @@ import time
 import collections
 
 from core.services import SuspicionDetection
+from core.platform.mongodb import mongodb
 from core.platform.opencv import VideoStream
 from core.platform.qt import qt4
 import vgconf
@@ -12,7 +13,7 @@ class DisplayScreen(object):
         self.qt = qt4.Qt()
         self.app = self.qt.get_application(args)
         self.detector = SuspicionDetection.SuspicionDetection()
-
+        # Main Window Params
         self.main_window_stylesheet = ('background-color: '
             'qradialgradient(spread:pad, cx:0.461, cy:0.0511364, '
             'radius:1.04, fx:0.461, fy:0.0511818, stop:0 '
@@ -76,6 +77,8 @@ class DisplayScreen(object):
         self.clear_button_geometry = (250, 440, 80, 34)
         self.file_selection_button_text = 'Select file to stream'
         self.file_selection_button_geometry = (30, 440, 210, 34)
+        self.login_button_text = 'Login'
+        self.login_button_geometry = (100,440,200,34)
         self.file_selection_filter = 'AVI (*.avi);;MP4 (*.mp4);;MKV (*.mkv)'
         self.file_selection_dialog_stylesheet = ('color: lightgrey;')
 
@@ -96,9 +99,18 @@ class DisplayScreen(object):
         self.event_detection_label_geometry = (510, 280, 171, 20)
         self.abnormal_activity_label_text = 'Abnormal Activity'
         self.abnormal_activity_label_geometry = (510, 390, 171, 20)
+
         self.date_time_label_text = 'Today\'s date and time'
         self.date_time_label_geometry = (20, 80, 271, 20)
         self.datetime_format = '%a %b %d %H:%M:%S %Z %Y'
+
+        self.uname_label_text = 'Username'
+        self.uname_label_geometry = (150, 110, 71, 20)
+        self.password_label_text = 'Password'
+        self.password_label_geometry = (150, 150, 71, 21)
+        self.uname_line_edit_geometry = (230, 110, 113, 20)
+        self.password_line_edit_geometry = (230, 150, 113, 20)
+        self.line_edit_stylesheet = ('color: black;\nbackground-color: white;')
 
         self.file_name_label_stylesheet = ('color: %s;\n'
             'background-color: rgba(0, 30, 58, 150);' % self.label_color)
@@ -166,6 +178,9 @@ class DisplayScreen(object):
         self.alert_beep = self.qt.get_phonon_media_source(
             vgconf.ALERT_BEEP_FILE)
         self.is_beep_playing = False
+
+        # MongoDB.
+        self.mongo = mongodb.MongoDBClient()
 
     def add_graphics_view(
             self, parent, name, geometry, stylesheet, interactive):
@@ -235,6 +250,15 @@ class DisplayScreen(object):
         self.qt.set_obj_stylesheet(obj, stylesheet)
         return obj
 
+    def add_line_edit(self, parent, name, geometry, is_password=False):
+        obj = self.qt.get_line_edit(parent)
+        if is_password:
+            obj = self.qt.set_echo_mode_password(obj)
+        self.qt.set_obj_name(obj,name)
+        self.qt.set_obj_geometry(obj, geometry)
+        self.qt.set_obj_stylesheet(obj, self.line_edit_stylesheet)
+        return obj
+
     def add_main_window(self, name, stylesheet, size):
         obj = self.qt.get_main_window()
         self.qt.set_obj_name(obj, name)
@@ -277,8 +301,95 @@ class DisplayScreen(object):
 
         return font
 
+    def create_login_components(self):
+
+        #Creating Main Window 
+        self.main_window = self.add_main_window(
+            'MainWindow', self.main_window_stylesheet, self.main_window_size)
+
+        # Create central widget.
+        self.central_widget = self.qt.qt_widget_wrapper(self.main_window)
+        self.qt.set_obj_name(self.central_widget, 'CentralWidget')
+
+        # Create Login widget
+        self.uname_label = self.add_label(
+            self.central_widget, 'Username', self.uname_label_geometry,
+            self.label_stylesheet)
+        self.password_label = self.add_label(
+            self.central_widget, 'Password', self.password_label_geometry,
+            self.label_stylesheet)
+        self.uname_line_edit = self.add_line_edit(
+            self.central_widget, 'uname_line_edit',
+            self.uname_line_edit_geometry)
+        self.password_line_edit = self.add_line_edit(
+            self.central_widget, 'password_line_edit',
+            self.password_line_edit_geometry, is_password=True)
+        #LoginButton
+        self.login_button = self.add_push_button(
+            self.central_widget, 'LoginButton', self.login_button_geometry,
+            self.push_button_stylesheet,
+            self.get_font(
+                self.default_font_family, self.push_button_point_size))
+        self.date_time_label = self.add_label(
+            self.central_widget, 'PredictionLabel',
+            self.date_time_label_geometry, self.label_stylesheet,
+            self.get_font(
+                self.default_font_family, self.push_button_point_size))
+        self.qt.connect_obj_event(
+            self.login_button, 'clicked()', self._verify_username_and_password)
+
+    def raise_login_ui_components(self):
+        self.uname_label.raise_()
+        self.password_label.raise_()
+        self.uname_line_edit.raise_()
+        self.password_line_edit.raise_()
+        self.login_button.raise_()
+        self.date_time_label.raise_()
+
+    def retranslate_login_ui(self):
+        self.qt.set_window_title(
+            self.main_window, 'MainWindow',
+            self.vigilancia_title_label_text, None)
+        self.qt.set_obj_text(
+            self.login_button, 'MainWindow', self.login_button_text, None)
+        self.qt.set_obj_text(
+            self.uname_label, 'MainWindow', self.uname_label_text, None)
+        self.qt.set_obj_text(
+            self.password_label, 'MainWindow', self.password_label_text, None)
+        self.qt.set_obj_text(
+            self.date_time_label, 'MainWindow', self.date_time_label_text, None)
+
+    def _verify_username_and_password(self):
+        uname = self.uname_line_edit.text()
+        passwd = self.password_line_edit.text()
+        if not self.mongo.verify_username_and_password(uname, passwd):
+            self.uname_line_edit.clear()
+            self.password_line_edit.clear()
+            return
+        self._create_all()
+
+    def _create_all(self):
+        self.main_window.show()
+        self.login_button.setParent(None)
+        self.login_button.deleteLater()
+        self.uname_label.setParent(None)
+        self.uname_label.deleteLater()
+        self.password_label.setParent(None)
+        self.password_label.deleteLater()
+        self.uname_line_edit.setParent(None)                
+        self.uname_line_edit.deleteLater()
+        self.password_line_edit.setParent(None)
+        self.password_line_edit.setParent(None)
+        self.create_ui_components()
+        self.raise_ui_components()
+        self.setup_main_window_and_status_bar()
+        self.retranslate_ui()
+        self.connect_elements_to_callback()
+        self.qt.connect_slots_by_name(self.main_window)
+        self.main_window.show()
+
     def create_ui_components(self):
-        # Craete main window.
+        # Create main window.
         self.main_window = self.add_main_window(
             'MainWindow', self.main_window_stylesheet, self.main_window_size)
 
@@ -410,6 +521,8 @@ class DisplayScreen(object):
             self.central_widget)
         self.alert_beep_player.setCurrentSource(self.alert_beep)
 
+        #self.main_window.show()
+
     def raise_ui_components(self):
         # Raise all components on main UI.
         self.alert_window.raise_()
@@ -442,9 +555,6 @@ class DisplayScreen(object):
 
     def retranslate_ui(self):
         # Set content of various UI components.
-        self.qt.set_window_title(
-            self.main_window, 'MainWindow',
-            self.vigilancia_title_label_text, None)
         self.qt.set_obj_text(
             self.start_button, 'MainWindow', self.start_button_text, None)
         self.qt.set_obj_text(
@@ -526,6 +636,11 @@ class DisplayScreen(object):
             self.detector.enable_yolo_detection()
         else:
             self.detector.disable_yolo_detection()
+            if not self.detector.is_firearm_detector_on:
+                self.objects_detected_view_text = 'Objects'
+                self.qt.set_obj_plain_text(
+                    self.objects_detected_view, 'MainWindow',
+                    self.objects_detected_view_text, None)
 
     def _firearm_detection_slider_value_changed(self):
         value = self.firearm_detection_slider.value()
@@ -533,6 +648,11 @@ class DisplayScreen(object):
             self.detector.enable_firearm_detection()
         else:
             self.detector.disable_firearm_detection()
+            if not self.detector.is_yolo_on:
+                self.objects_detected_view_text = 'Objects'
+                self.qt.set_obj_plain_text(
+                    self.objects_detected_view, 'MainWindow',
+                    self.objects_detected_view_text, None)
 
     def _event_detection_slider_value_changed(self):
         value = self.event_detection_slider.value()
@@ -540,7 +660,10 @@ class DisplayScreen(object):
             self.detector.enable_event_detection()
         else:
             self.detector.disable_event_detection()
-            self._update_detected_events('Events')
+            self.events_detected_view_text = 'Events'
+            self.qt.set_obj_plain_text(
+                self.events_detected_view, 'MainWindow',
+                self.events_detected_view_text, None)
 
     def _abnormal_activity_slider_value_changed(self):
         value = self.abnormal_activity_slider.value()
@@ -548,70 +671,54 @@ class DisplayScreen(object):
             self.detector.enable_unusual_activity_detection()
         else:
             self.detector.disable_unusual_activity_detection()
-            self._update_detected_activity('Activity')
+            self.activity_detected_view_text = 'Activity'
+            self.qt.set_obj_plain_text(
+                self.activity_detected_view, 'MainWindow',
+                self.activity_detected_view_text, None)
 
     def _update_detected_objects(self, objects_prediction):
-        
-        if self.detector.is_yolo_on or self.detector.is_firearm_detector_on:
-            parsed_objects = [p['label'] for p in objects_prediction]
-            parsed_objects_dict = collections.Counter(parsed_objects)
-            detected_suspicious_objects = False
-            objects = ''
+        parsed_objects = [p['label'] for p in objects_prediction]
+        parsed_objects_dict = collections.Counter(parsed_objects)
+        detected_suspicious_objects = False
+        objects = ''
 
-            for (obj, count) in parsed_objects_dict.items():
-                objects += '%s (%d)\n' % (obj, count)
-                if obj in vgconf.SUSPICIOUS_OBJECTS_LIST:
-                    detected_suspicious_objects = True
+        for (obj, count) in parsed_objects_dict.items():
+            objects += '%s (%d)\n' % (obj, count)
+            if obj in vgconf.SUSPICIOUS_OBJECTS_LIST:
+                detected_suspicious_objects = True
 
-            self.objects_detected_view_text = objects
-            self.qt.set_obj_plain_text(
-                self.objects_detected_view, 'MainWindow',
-                self.objects_detected_view_text, None)
+        self.objects_detected_view_text = objects
+        self.qt.set_obj_plain_text(
+            self.objects_detected_view, 'MainWindow',
+            self.objects_detected_view_text, None)
 
-            # Start alert if suspicious object is detected.
-            if detected_suspicious_objects:
-                self._start_alert()
-        else:
-            self.objects_detected_view_text = 'Objects'
-            self.qt.set_obj_plain_text(
-                self.objects_detected_view, 'MainWindow',
-                self.objects_detected_view_text, None)
+        # Start alert if suspicious object is detected.
+        if detected_suspicious_objects:
+            self._start_alert()
 
     def _update_detected_events(self, events_prediction):
-        if self.detector.is_event_detector_on:
-            events = ', '.join(events_prediction)
-            self.events_detected_view_text = events
-            self.qt.set_obj_plain_text(
-                self.events_detected_view, 'MainWindow',
-                self.events_detected_view_text, None)
+        events = ', '.join(events_prediction)
+        self.events_detected_view_text = events
+        self.qt.set_obj_plain_text(
+            self.events_detected_view, 'MainWindow',
+            self.events_detected_view_text, None)
 
-            detected_suspicious_events = False
-            for event in events_prediction:
-                if event in vgconf.SUSPICIOUS_EVENTS_LIST:
-                    detected_suspicious_events = True
+        detected_suspicious_events = False
+        for event in events_prediction:
+            if event in vgconf.SUSPICIOUS_EVENTS_LIST:
+                detected_suspicious_events = True
 
-            if detected_suspicious_events:
-                self._start_alert()
-        else:
-            self.events_detected_view_text = events_prediction
-            self.qt.set_obj_plain_text(
-                self.events_detected_view, 'MainWindow',
-                self.events_detected_view_text, None)
+        if detected_suspicious_events:
+            self._start_alert()
 
     def _update_detected_activity(self, activity_prediction):
-        if self.detector.is_activity_detector_on:
-            self.activity_detected_view_text = activity_prediction
-            self.qt.set_obj_plain_text(
-                self.activity_detected_view, 'MainWindow',
-                self.activity_detected_view_text, None)
+        self.activity_detected_view_text = activity_prediction
+        self.qt.set_obj_plain_text(
+            self.activity_detected_view, 'MainWindow',
+            self.activity_detected_view_text, None)
 
-            if activity_prediction == vgconf.ABNORMAL_ACTIVITY:
-                self._start_alert()
-        else:
-            self.activity_detected_view_text = activity_prediction
-            self.qt.set_obj_plain_text(
-                self.activity_detected_view, 'MainWindow',
-                self.activity_detected_view_text, None)
+        if activity_prediction == vgconf.ABNORMAL_ACTIVITY:
+            self._start_alert()
 
     def _update_stream_name_label(self):
         filename = 'webcam'
@@ -654,7 +761,8 @@ class DisplayScreen(object):
         if self.firearm_detector_prediction:
             self.detected_objects.extend(self.firearm_detector_prediction)
 
-        self._update_detected_objects(self.detected_objects)
+        if self.detected_objects:
+            self._update_detected_objects(self.detected_objects)
         if self.activity_detector_prediction:
             self._update_detected_activity(self.activity_detector_prediction)
         if self.event_detector_prediction:
@@ -739,14 +847,13 @@ class DisplayScreen(object):
         self.qt.connect_obj_event(
             self.alert_beep_player, 'finished()', self._audio_alert_finished)
 
-    def create_application(self):
-        self.create_ui_components()
-        self.raise_ui_components()
+    def create_login(self):
+        self.create_login_components()
+        self.raise_login_ui_components()
         self.setup_main_window_and_status_bar()
-        self.retranslate_ui()
-        self.connect_elements_to_callback()
-        self.qt.connect_slots_by_name(self.main_window)
+        self.retranslate_login_ui()
         self.main_window.show()
+        print("Starting Vigilancia...")
 
     def _close(self):
         self.stream_timer.stop()
